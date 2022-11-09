@@ -1,1 +1,76 @@
-# importing-code-nd-db
+# jenkins pipeline to import code nd db, change url's 
+
+pipeline {
+    agent any
+    environment {
+        dockerhub=credentials('dockerhub')
+        CONTAINER_NAME = 'url'
+        DB_USER = 'magento'
+        DB_PASSWORD = 'magento'
+        DATABASE = 'magento'
+        SED="sed -re 's/DEFINER=`[^`]+`@`[^`]+`//'"
+        DB_PATH='/var/www/html/27-Sep-2022'
+    }
+    stages {
+        stage('pull docker image') {
+            steps {
+                sh """
+                cd /home/srikanthc/dockerpull && sudo -S docker pull srikanthcheemala/2.4.2:magento
+                """
+            }
+        }
+        stage('create container and go inside it') {
+            steps {
+                sh """
+                sudo -S docker rm -f ${CONTAINER_NAME}
+                sudo -S docker run -itd -v /var/www/html:/var/www/html --name=${CONTAINER_NAME} srikanthcheemala/trail:2.4.2
+                sudo -S docker exec -i ${CONTAINER_NAME} sh
+                """
+            }
+        }
+        stage("get db and code") {
+            steps {
+                sh """ 
+                sudo -S docker exec -i ${CONTAINER_NAME} sh
+                sudo -S docker cp /home/srikanthc/Downloads/27-Sep-2022 ${CONTAINER_NAME}:/var/www/html
+                """
+            }
+        }
+        stage('use zcat') {
+            steps {
+                sh """
+                sudo -S docker exec -i ${CONTAINER_NAME} sh "${DB_PATH}"/dbshell.sh
+                """
+            }
+        }
+        stage('login to mysql') {
+            steps {
+                sleep (140)
+                sh """
+                        sudo -S docker exec ${CONTAINER_NAME} mysql -u ${DB_USER} -p${DB_PASSWORD} ${DATABASE} -e 'update core_config_data set value = "http://kanthuexporting.com/" where config_id in (2,3,1265,1266,1423,1424,1425,1426,1429,1430,1431,1432);'
+                  """
+            }
+        }
+        stage('get env.php') {
+            steps {
+                sh """
+                sudo -S docker cp /home/srikanthc/env.php ${CONTAINER_NAME}:/var/www/html/magento/app/etc
+                """
+            }
+        }
+        stage('run the magento commands') {
+            steps {
+                sh """
+                sudo -S docker exec url sh -c "php /var/www/html/magento setup:upgrade"
+                sudo -S docker exec url sh -c "php /var/www/html/magento setup:di:compile"
+                sudo -S docker exec url sh -c "php /var/www/html/magento setup:static-content:deploy -f"
+                sudo -S docker exec url sh -c "php /var/www/html/magento cache:clean" 
+                sudo -S docker exec url sh -c "php /var/www/html/magento cache:flush" 
+                sudo -S docker exec url sh -c "chown -R magento:www-data /var/www/html" 
+                """
+            }
+        }
+    }
+}
+
+        
